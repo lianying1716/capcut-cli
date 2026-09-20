@@ -45,3 +45,39 @@ jobs:
         with:
           name: capcut-cli-${{ matrix.target }}
           path: dist/capcut-cli-${{ matrix.target }}.tar.gz
+
+  # 把三平台二进制 SCP 到 HK 镜像目录，作为插件中心的国内下载源。
+  # HK 只被动接收文件，不装 Rust、不跑 cron。
+  upload-hk:
+    needs: build
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        target:
+          - x86_64-unknown-linux-gnu
+          - x86_64-apple-darwin
+          - aarch64-apple-darwin
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: capcut-cli-${{ matrix.target }}
+          path: dist
+
+      - name: Upload binary to HK mirror
+        env:
+          HK_HOST: 64.90.13.135
+          HK_DIR: /www/wwwroot/mirrors/capcut-cli
+          HK_SSH_KEY: ${{ secrets.HK_SSH_KEY }}
+        run: |
+          set -euo pipefail
+          mkdir -p ~/.ssh
+          printf '%s\n' "$HK_SSH_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan -H "$HK_HOST" >> ~/.ssh/known_hosts 2>/dev/null
+          tar -xzf "dist/capcut-cli-${{ matrix.target }}.tar.gz" -C dist
+          scp -i ~/.ssh/id_ed25519 -o StrictHostKeyChecking=accept-new \
+            "dist/capcut-cli" "root@${HK_HOST}:${HK_DIR}/capcut-cli-${{ matrix.target }}"
+          ssh -i ~/.ssh/id_ed25519 -o StrictHostKeyChecking=accept-new \
+            "root@${HK_HOST}" "chmod 755 ${HK_DIR}/capcut-cli-${{ matrix.target }} && ls -la ${HK_DIR}"
+          echo "Uploaded capcut-cli-${{ matrix.target }} to HK"

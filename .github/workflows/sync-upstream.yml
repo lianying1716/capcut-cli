@@ -1,0 +1,54 @@
+name: sync-upstream
+
+# 看门狗：每 15 分钟用 git 协议探测上游（不占 REST API 限流）。
+# 上游恢复公开且有新 commit 时，拉源码覆盖本仓库（保留本仓库 .github CI），
+# push main 自动触发 build-release-binaries.yml → 构建 → 上传 HK。
+on:
+  schedule:
+    - cron: '*/15 * * * *'
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Probe upstream (git protocol, no API rate limit)
+        id: probe
+        env:
+          UPSTREAM: ${{ vars.UPSTREAM_URL || 'https://github.com/renzander030/capcut-cli.git' }}
+        run: |
+          set -uo pipefail
+          if git ls-remote --heads "$UPSTREAM" main >/dev/null 2>&1; then
+            SHA="$(git ls-remote "$UPSTREAM" refs/heads/main | awk '{print $1}')"
+            echo "reachable=true" >> "$GITHUB_OUTPUT"
+            echo "sha=${SHA}" >> "$GITHUB_OUTPUT"
+            echo "Upstream reachable: ${SHA}"
+          else
+            echo "reachable=false" >> "$GITHUB_OUTPUT"
+            echo "Upstream not reachable yet (private/renamed/deleted)"
+          fi
+
+      - name: Sync upstream source (keep our .github CI)
+        if: steps.probe.outputs.reachable == 'true'
+        env:
+          UPSTREAM: ${{ vars.UPSTREAM_URL || 'https://github.com/renzander030/capcut-cli.git' }}
+          UP_SHA: ${{ steps.probe.outputs.sha }}
+        run: |
+          set -euo pipefail
+          git config --global user.name "capcut-sync-bot"
+          git config --global user.email "sync@xsai5.xyz"
+          git clone --depth 1 "$UPSTREAM" /tmp/up
+          rsync -a --delete --exclude='.git' --exclude='.github' /tmp/up/ ./
+          if [ -n "$(git status -s)" ]; then
+            git add -A
+            git commit -m "sync: upstream ${UP_SHA}"
+            git push origin main
+            echo "Synced upstream ${UP_SHA} -> main (triggers build)"
+          else
+            echo "No changes from upstream, skipping"
+          fi

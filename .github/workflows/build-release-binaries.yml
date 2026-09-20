@@ -75,6 +75,9 @@ jobs:
           printf '%s\n' "$HK_SSH_KEY" > ~/.ssh/id_ed25519
           chmod 600 ~/.ssh/id_ed25519
           ssh-keyscan -H "$HK_HOST" >> ~/.ssh/known_hosts 2>/dev/null
+          # 自愈：确保 HK 镜像目录存在（不依赖手工预建）
+          ssh -i ~/.ssh/id_ed25519 -o StrictHostKeyChecking=accept-new \
+            "root@${HK_HOST}" "mkdir -p ${HK_DIR}"
           tar -xzf "dist/capcut-cli-${{ matrix.target }}.tar.gz" -C dist
           scp -i ~/.ssh/id_ed25519 -o StrictHostKeyChecking=accept-new \
             "dist/capcut-cli" "root@${HK_HOST}:${HK_DIR}/capcut-cli-${{ matrix.target }}"
